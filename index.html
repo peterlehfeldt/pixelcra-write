@@ -4,28 +4,61 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>write · the broken pilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* pixelcra.sh — bone palette, JetBrains Mono. Driven by homepage. */
 :root {
-  --bg: #030810; --panel: #070f1e; --border: #0d2240;
-  --accent: #00ffe7; --accent2: #ff3c6e; --accent3: #ffe600;
-  --text: #a8cce0; --dim: #334d66;
+  --bg: #161514;
+  --bg-deep: #0e0d0c;
+  --bg-glow: #221f1d;
+  --panel: #0e0d0c;
+  --border: rgba(232, 220, 198, 0.16);
+  --accent: #e8dcc6;
+  --accent2: #c25a3e;
+  --accent3: #d4b896;
+  --text: #ece4d4;
+  --dim: rgba(236, 228, 212, 0.5);
+  --glow: rgba(232,220,198,0.35);
+  --pix-font: 'JetBrains Mono', ui-monospace, Menlo, monospace;
 }
-html, body { height: 100%; background: var(--bg); color: var(--text); font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--pix-font); }
 #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
 header {
   display: flex; align-items: center; gap: 14px;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
   flex-shrink: 0; font-size: 12px;
 }
-header .title { color: var(--accent); letter-spacing: 2px; font-weight: bold; }
+
+/* shared home-link chrome */
+.px-home {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  font-family: var(--pix-font); font-weight: 600; font-size: 14px;
+  color: var(--accent); text-decoration: none; letter-spacing: -0.02em;
+  text-shadow: 0 0 14px var(--glow);
+}
+.px-home:hover { opacity: 0.85; }
+.px-home .px-g { opacity: 0.6; }
+.px-home .px-d { color: var(--accent3); }
+.px-home .px-c {
+  display: inline-block; width: 8px; height: 14px;
+  background: currentColor; transform: translateY(2px);
+  box-shadow: 0 0 10px var(--glow);
+}
+.px-sep { color: var(--dim); margin: 0 4px; }
+.px-slug { color: var(--text); opacity: 0.85; letter-spacing: 2px; text-transform: lowercase; font-weight: 500; font-size: 13px; }
+
 header .meta { color: var(--dim); flex: 1; }
 header .meta .dirty { color: var(--accent3); }
 header .meta .err { color: var(--accent2); }
 header .sha { color: var(--accent); opacity: 0.7; font-size: 11px; }
 header button {
-  background: #040c1a; border: 1px solid var(--border); color: var(--text);
-  font-family: inherit; font-size: 12px; padding: 6px 14px; border-radius: 3px;
+  background: var(--bg-deep); border: 1px solid var(--border); color: var(--text);
+  font-family: var(--pix-font); font-size: 12px; padding: 6px 14px; border-radius: 3px;
   cursor: pointer;
 }
 header button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
@@ -34,9 +67,9 @@ header button.dirty { border-color: var(--accent3); color: var(--accent3); }
 #editor {
   flex: 1; min-height: 0;
   background: var(--bg); color: var(--text);
-  font-family: inherit; font-size: 14px; line-height: 1.6;
+  font-family: var(--pix-font); font-size: 14px; line-height: 1.7;
   border: none; outline: none; resize: none;
-  padding: 18px 22px; width: 100%;
+  padding: 24px 28px; width: 100%;
 }
 #editor:disabled { opacity: 0.5; }
 </style>
@@ -44,7 +77,11 @@ header button.dirty { border-color: var(--accent3); color: var(--accent3); }
 <body>
 <div id="app">
   <header>
-    <span class="title">⟆ WRITE</span>
+    <div style="display:flex;align-items:baseline;gap:10px;min-width:0;">
+      <a class="px-home" href="https://pixelcra.sh" title="back to pixelcra.sh"><span class="px-g">&gt;</span>pixelcra<span class="px-d">.</span>sh<span class="px-c"></span></a>
+      <span class="px-sep">/</span>
+      <span class="px-slug">write</span>
+    </div>
     <span class="meta" id="meta">loading…</span>
     <span class="sha" id="sha"></span>
     <button id="saveBtn" disabled>SAVE</button>
