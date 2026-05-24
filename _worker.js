@@ -12,7 +12,13 @@
 
 const MANUSCRIPT_REPO = 'peterlehfeldt/TheBrokenPilot';
 const MANUSCRIPT_BRANCH = 'main';
-const MANUSCRIPT_PATH = 'The Broken Pilot.md';
+
+// Editable documents in the manuscript repo. The frontend addresses these by
+// the keys below; the path is what GitHub sees.
+const DOCS = {
+  manuscript: { repo: MANUSCRIPT_REPO, branch: MANUSCRIPT_BRANCH, path: 'The Broken Pilot.md' },
+  scenelist:  { repo: MANUSCRIPT_REPO, branch: MANUSCRIPT_BRANCH, path: 'Broken Pilot Scene List.md' },
+};
 
 const CONFIG_REPO = 'peterlehfeldt/write-config';
 const CONFIG_BRANCH = 'main';
@@ -26,9 +32,12 @@ export default {
     const p = url.pathname;
 
     try {
-      if (p === '/api/file') {
-        if (req.method === 'GET') return getManuscript(env);
-        if (req.method === 'PUT') return putManuscript(req, env);
+      const fileMatch = p.match(/^\/api\/file\/([^/]+)$/);
+      if (fileMatch) {
+        const name = decodeURIComponent(fileMatch[1]);
+        if (!DOCS[name]) return json({ error: `unknown document: ${name}` }, 404);
+        if (req.method === 'GET') return getDoc(env, name);
+        if (req.method === 'PUT') return putDoc(req, env, name);
         return methodNotAllowed();
       }
 
@@ -130,19 +139,21 @@ async function ghDeleteFile(env, repo, branch, path, sha, message) {
   return await r.json();
 }
 
-// ---------- manuscript ----------
+// ---------- editable documents ----------
 
-async function getManuscript(env) {
-  const f = await ghGetFile(env, MANUSCRIPT_REPO, MANUSCRIPT_BRANCH, MANUSCRIPT_PATH);
-  if (!f) return json({ error: 'manuscript not found' }, 404);
-  return json({ sha: f.sha, content: f.content });
+async function getDoc(env, name) {
+  const d = DOCS[name];
+  const f = await ghGetFile(env, d.repo, d.branch, d.path);
+  if (!f) return json({ error: `${name} not found` }, 404);
+  return json({ name, sha: f.sha, content: f.content });
 }
 
-async function putManuscript(req, env) {
+async function putDoc(req, env, name) {
+  const d = DOCS[name];
   const { sha, content, message } = await req.json();
   if (typeof content !== 'string') return json({ error: 'content required' }, 400);
-  const j = await ghPutFile(env, MANUSCRIPT_REPO, MANUSCRIPT_BRANCH, MANUSCRIPT_PATH, content, sha, message);
-  return json({ sha: j.content.sha, commit: j.commit.sha });
+  const j = await ghPutFile(env, d.repo, d.branch, d.path, content, sha, message);
+  return json({ name, sha: j.content.sha, commit: j.commit.sha });
 }
 
 // ---------- skills ----------
@@ -208,10 +219,12 @@ async function deleteSession(env, id) {
 const PROPOSE_EDITS_TOOL = {
   name: 'propose_edits',
   description:
-    'Reply to the author and optionally propose edits to the manuscript. ' +
+    'Reply to the author and optionally propose edits to one of the editable documents. ' +
+    'Each edit targets either the "manuscript" (the prose) or the "scenelist" (the planning table). ' +
     'Use type "spelling" or "grammar" ONLY for safe, narrow, mechanical corrections — these are auto-applied without review. ' +
     'Use type "prose" for any stylistic, structural, or substantive change — these are queued for the author to accept or reject. ' +
-    'Each edit\'s `find` MUST be an exact, unique substring of the manuscript text that was sent.',
+    'To insert NEW text (e.g. scaffolding a new scene, appending a new row to the scene list), use type "insert" with `at` set to either the literal string "end" or an exact substring after which the new text should appear. For "insert" edits, `find` should be the empty string. ' +
+    'For non-insert edits, `find` MUST be an exact, unique substring of the document text that was sent.',
   input_schema: {
     type: 'object',
     properties: {
@@ -224,12 +237,14 @@ const PROPOSE_EDITS_TOOL = {
         items: {
           type: 'object',
           properties: {
-            type: { type: 'string', enum: ['spelling', 'grammar', 'prose'] },
+            document: { type: 'string', enum: ['manuscript', 'scenelist'], description: 'Which document the edit targets. Defaults to manuscript if omitted.' },
+            type: { type: 'string', enum: ['spelling', 'grammar', 'prose', 'insert'] },
             find: { type: 'string' },
             replace: { type: 'string' },
+            at: { type: 'string', description: 'For insert edits only: "end" or an exact substring to insert after.' },
             reason: { type: 'string' },
           },
-          required: ['type', 'find', 'replace', 'reason'],
+          required: ['type', 'reason'],
         },
       },
     },
@@ -240,7 +255,7 @@ const PROPOSE_EDITS_TOOL = {
 async function chat(req, env) {
   if (!env.ANTHROPIC_API_KEY) return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
 
-  const { skill, messages, contextText, contextLabel } = await req.json();
+  const { skill, messages, contextText, contextLabel, sceneListText } = await req.json();
   if (!Array.isArray(messages) || messages.length === 0) {
     return json({ error: 'messages required' }, 400);
   }
@@ -254,7 +269,8 @@ async function chat(req, env) {
       type: 'text',
       text:
         'You are an editorial sidekick for a novelist working in the pixelcra.sh "write" app. ' +
-        'You always reply by calling the `propose_edits` tool. ' +
+        'Two documents are editable: the manuscript (prose) and the scenelist (planning table with status flags). ' +
+        'You always reply by calling the `propose_edits` tool; tag each edit with the `document` it targets ("manuscript" or "scenelist"). ' +
         'Keep `message` short — the author values terse, direct feedback. ' +
         'When the author asks a question that does not call for edits, return an empty `edits` array.',
     },
@@ -263,6 +279,13 @@ async function chat(req, env) {
     systemBlocks.push({
       type: 'text',
       text: `--- active skill: ${skill} ---\n\n${skillBody}`,
+      cache_control: { type: 'ephemeral' },
+    });
+  }
+  if (typeof sceneListText === 'string' && sceneListText.length > 0) {
+    systemBlocks.push({
+      type: 'text',
+      text: `--- scenelist (full) ---\n\n${sceneListText}`,
       cache_control: { type: 'ephemeral' },
     });
   }
@@ -307,9 +330,20 @@ async function chat(req, env) {
     return json({ error: 'model did not return propose_edits tool call', raw: data }, 502);
   }
 
+  // Normalize edits: default `document` to "manuscript", default `find` to "" for inserts.
+  const rawEdits = Array.isArray(toolBlock.input.edits) ? toolBlock.input.edits : [];
+  const edits = rawEdits.map(e => ({
+    document: e.document === 'scenelist' ? 'scenelist' : 'manuscript',
+    type: e.type,
+    find: typeof e.find === 'string' ? e.find : '',
+    replace: typeof e.replace === 'string' ? e.replace : '',
+    at: typeof e.at === 'string' ? e.at : undefined,
+    reason: e.reason || '',
+  }));
+
   return json({
     message: toolBlock.input.message || '',
-    edits: Array.isArray(toolBlock.input.edits) ? toolBlock.input.edits : [],
+    edits,
     usage: data.usage,
     model: data.model,
   });

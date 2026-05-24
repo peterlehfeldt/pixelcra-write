@@ -98,6 +98,20 @@ main {
 }
 
 #editor-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.tabs {
+  display: flex; gap: 0; padding: 0 12px; background: var(--panel);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.tab {
+  background: transparent; border: none; color: var(--dim);
+  font-family: var(--pix-font); font-size: 12px; padding: 8px 14px;
+  cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  letter-spacing: 0.5px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab.dirty::after { content: ' ·'; color: var(--accent3); }
 #editor {
   flex: 1; min-height: 0;
   background: var(--bg); color: var(--text);
@@ -146,6 +160,13 @@ main {
 .edit .type.spelling { background: rgba(127, 176, 105, 0.15); color: var(--accent-ok); }
 .edit .type.grammar  { background: rgba(127, 176, 105, 0.15); color: var(--accent-ok); }
 .edit .type.prose    { background: rgba(212, 184, 150, 0.15); color: var(--accent3); }
+.edit .type.insert   { background: rgba(232, 220, 198, 0.12); color: var(--accent); }
+.edit .doc {
+  font-size: 10px; padding: 2px 6px; border-radius: 2px;
+  background: rgba(194, 90, 62, 0.15); color: var(--accent2);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.edit .ins-at { color: var(--dim); }
 .edit .status { font-size: 10px; color: var(--dim); margin-left: auto; }
 .edit .status.applied { color: var(--accent-ok); }
 .edit .status.dismissed { color: var(--dim); }
@@ -241,6 +262,10 @@ main {
   </header>
   <main>
     <div id="editor-wrap">
+      <div class="tabs">
+        <button class="tab active" data-doc="manuscript">manuscript</button>
+        <button class="tab" data-doc="scenelist">scene list</button>
+      </div>
       <textarea id="editor" spellcheck="false" disabled placeholder="loading…"></textarea>
     </div>
     <aside id="claude">
@@ -298,15 +323,24 @@ const sendBtn     = document.getElementById('sendBtn');
 const contextLabel= document.getElementById('contextLabel');
 const sendFullDoc = document.getElementById('sendFullDoc');
 
-let savedContent = '';
-let sha = null;
-let lastSaveAt = null;
-let saving = false;
+// One state slot per editable document. The editor textarea always shows the
+// active doc; non-active docs hold their pending edits in `currentContent` and
+// their UI state (scroll, selection) so tab switches are stateless from the
+// editor's perspective.
+const docs = {
+  manuscript: { savedContent: '', currentContent: '', sha: null, lastSaveAt: null, saving: false, scrollTop: 0, selStart: 0, selEnd: 0, loaded: false },
+  scenelist:  { savedContent: '', currentContent: '', sha: null, lastSaveAt: null, saving: false, scrollTop: 0, selStart: 0, selEnd: 0, loaded: false },
+};
+let activeDoc = 'manuscript';
+function active() { return docs[activeDoc]; }
 
 let currentSession = null; // { id, skill, startedAt, updatedAt, messages: [...] }
 let sessionDirty = false;
 let sessionSaveTimer = null;
 let chatBusy = false;
+
+// Track all tab buttons for dirty / active state.
+const tabButtons = document.querySelectorAll('.tab');
 
 // ---------- meta render ----------
 function fmtRel(ts) {
@@ -318,69 +352,119 @@ function fmtRel(ts) {
   return `${Math.floor(s/86400)}d ago`;
 }
 
+function isDirty(d) { return d.currentContent !== d.savedContent; }
+
+function refreshTabDirtyState() {
+  for (const btn of tabButtons) {
+    const name = btn.dataset.doc;
+    btn.classList.toggle('dirty', isDirty(docs[name]));
+    btn.classList.toggle('active', name === activeDoc);
+  }
+}
+
 function renderMeta(state, extra) {
-  const dirty = editor.value !== savedContent;
+  const d = active();
+  // Pull the freshest content from the textarea when active.
+  if (state !== 'loading') d.currentContent = editor.value;
+  const dirty = isDirty(d);
   saveBtn.classList.toggle('dirty', dirty);
-  saveBtn.disabled = saving || !dirty;
+  saveBtn.disabled = d.saving || !dirty;
+  shaEl.textContent = d.sha ? `sha ${d.sha.slice(0,7)}` : '';
+  refreshTabDirtyState();
   if (state === 'loading')  { meta.innerHTML = 'loading…'; return; }
   if (state === 'saving')   { meta.innerHTML = 'saving…'; return; }
   if (state === 'error')    { meta.innerHTML = `<span class="err">${escapeHtml(extra || 'error')}</span>`; return; }
   if (state === 'conflict') { meta.innerHTML = `<span class="err">remote changed — reload to pull latest</span>`; return; }
   const dot = dirty ? ' <span class="dirty">·</span>' : '';
-  meta.innerHTML = lastSaveAt ? `saved ${fmtRel(lastSaveAt)}${dot}` : `loaded${dot}`;
+  meta.innerHTML = d.lastSaveAt ? `saved ${fmtRel(d.lastSaveAt)}${dot}` : `loaded${dot}`;
 }
 
-// ---------- manuscript ----------
-async function loadFile() {
-  renderMeta('loading');
+// ---------- doc load / save ----------
+
+async function loadDoc(name, { makeActive = false } = {}) {
+  const d = docs[name];
+  if (makeActive && name === activeDoc) renderMeta('loading');
   try {
-    const r = await fetch('/api/file', { cache: 'no-store' });
+    const r = await fetch(`/api/file/${encodeURIComponent(name)}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
     const j = await r.json();
-    savedContent = j.content;
-    sha = j.sha;
-    editor.value = savedContent;
-    editor.disabled = false;
-    shaEl.textContent = sha ? `sha ${sha.slice(0,7)}` : '';
-    lastSaveAt = null;
-    renderMeta('idle');
-    enableJumpControls(true);
-    refreshSectionList();
-    updateContextLabel();
-    updateStats();
+    d.savedContent = j.content;
+    d.currentContent = j.content;
+    d.sha = j.sha;
+    d.lastSaveAt = null;
+    d.loaded = true;
+    if (name === activeDoc) hydrateEditorFromActive();
   } catch (e) {
-    renderMeta('error', e.message);
+    if (name === activeDoc) renderMeta('error', e.message);
+    else console.warn(`failed to load ${name}:`, e.message);
   }
 }
 
-async function saveFile() {
-  if (saving) return;
-  if (editor.value === savedContent) return;
-  saving = true;
-  renderMeta('saving');
+async function saveDoc(name = activeDoc) {
+  const d = docs[name];
+  if (d.saving) return;
+  if (name === activeDoc) d.currentContent = editor.value;
+  if (!isDirty(d)) return;
+  d.saving = true;
+  if (name === activeDoc) renderMeta('saving');
   try {
-    const r = await fetch('/api/file', {
+    const r = await fetch(`/api/file/${encodeURIComponent(name)}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sha, content: editor.value }),
+      body: JSON.stringify({ sha: d.sha, content: d.currentContent }),
     });
     if (r.status === 409 || r.status === 422) {
-      saving = false;
-      renderMeta('conflict');
+      d.saving = false;
+      if (name === activeDoc) renderMeta('conflict');
       return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
     const j = await r.json();
-    sha = j.sha;
-    savedContent = editor.value;
-    lastSaveAt = Date.now();
-    shaEl.textContent = `sha ${sha.slice(0,7)}`;
-    saving = false;
-    renderMeta('idle');
+    d.sha = j.sha;
+    d.savedContent = d.currentContent;
+    d.lastSaveAt = Date.now();
+    d.saving = false;
+    if (name === activeDoc) renderMeta('idle');
+    refreshTabDirtyState();
   } catch (e) {
-    saving = false;
-    renderMeta('error', e.message);
+    d.saving = false;
+    if (name === activeDoc) renderMeta('error', e.message);
+    else console.warn(`failed to save ${name}:`, e.message);
   }
+}
+
+// Push the active doc's content into the textarea + restore its UI state.
+function hydrateEditorFromActive() {
+  const d = active();
+  editor.value = d.currentContent;
+  editor.disabled = !d.loaded;
+  editor.setSelectionRange(d.selStart || 0, d.selEnd || 0);
+  editor.scrollTop = d.scrollTop || 0;
+  // Section-scoped controls only make sense for the manuscript.
+  const isProse = activeDoc === 'manuscript';
+  enableJumpControls(isProse && d.loaded);
+  if (isProse) refreshSectionList();
+  else jumpSelect.innerHTML = '<option value="">§</option>';
+  renderMeta('idle');
+  updateContextLabel();
+  updateStats();
+}
+
+// Snapshot the active doc's UI state into its slot before switching away.
+function snapshotActiveDocUiState() {
+  const d = active();
+  d.currentContent = editor.value;
+  d.scrollTop = editor.scrollTop;
+  d.selStart = editor.selectionStart;
+  d.selEnd = editor.selectionEnd;
+}
+
+function switchTab(name) {
+  if (!docs[name] || name === activeDoc) return;
+  snapshotActiveDocUiState();
+  activeDoc = name;
+  hydrateEditorFromActive();
+  localStorage.setItem('write:activeDoc', activeDoc);
 }
 
 // ---------- section parsing ----------
@@ -674,9 +758,14 @@ function renderEdit(message, edit, idx) {
   const root = document.createElement('div'); root.className = 'edit';
   const head = document.createElement('div'); head.className = 'edit-head';
   const t = document.createElement('span'); t.className = `type ${edit.type}`; t.textContent = edit.type;
+  head.appendChild(t);
+  if (edit.document && edit.document !== 'manuscript') {
+    const doc = document.createElement('span'); doc.className = 'doc'; doc.textContent = edit.document;
+    head.appendChild(doc);
+  }
   const status = document.createElement('span'); status.className = 'status'; status.textContent = edit.status || 'pending';
   if (edit.status) status.classList.add(edit.status);
-  head.appendChild(t); head.appendChild(status);
+  head.appendChild(status);
   root.appendChild(head);
 
   if (edit.reason) {
@@ -684,10 +773,17 @@ function renderEdit(message, edit, idx) {
     root.appendChild(reason);
   }
   const diff = document.createElement('div'); diff.className = 'diff';
-  const del = document.createElement('span'); del.className = 'del'; del.textContent = edit.find;
-  const sp = document.createElement('span'); sp.textContent = '  →  ';
-  const ins = document.createElement('span'); ins.className = 'ins'; ins.textContent = edit.replace;
-  diff.appendChild(del); diff.appendChild(sp); diff.appendChild(ins);
+  if (edit.type === 'insert') {
+    const where = document.createElement('span'); where.className = 'ins-at';
+    where.textContent = `insert ${edit.at === 'end' || !edit.at ? 'at end' : `after "${(edit.at || '').slice(0, 40)}${(edit.at || '').length > 40 ? '…' : ''}"`}: `;
+    const ins = document.createElement('span'); ins.className = 'ins'; ins.textContent = edit.replace || '';
+    diff.appendChild(where); diff.appendChild(ins);
+  } else {
+    const del = document.createElement('span'); del.className = 'del'; del.textContent = edit.find;
+    const sp = document.createElement('span'); sp.textContent = '  →  ';
+    const ins = document.createElement('span'); ins.className = 'ins'; ins.textContent = edit.replace;
+    diff.appendChild(del); diff.appendChild(sp); diff.appendChild(ins);
+  }
   root.appendChild(diff);
 
   if (!edit.status || edit.status === 'pending') {
@@ -711,18 +807,48 @@ function setEditStatus(rootEl, edit, status) {
   markSessionDirty();
 }
 
-function applyEdit(message, edit, idx, rootEl) {
-  const idxInText = editor.value.indexOf(edit.find);
-  if (idxInText === -1) {
-    setEditStatus(rootEl, edit, 'missing');
-    return;
+// Apply an edit to the right doc, whether or not that doc is currently active.
+// Returns { ok, status } where status is "applied" / "missing".
+function applyEditToDoc(edit) {
+  const docName = edit.document || 'manuscript';
+  const d = docs[docName];
+  if (!d || !d.loaded) return { ok: false, status: 'missing' };
+  const src = docName === activeDoc ? editor.value : d.currentContent;
+
+  let next;
+  if (edit.type === 'insert') {
+    const at = edit.at || 'end';
+    if (at === 'end') {
+      const sep = src.endsWith('\n') ? '' : '\n';
+      next = src + sep + (edit.replace || '');
+    } else {
+      const idx = src.indexOf(at);
+      if (idx === -1) return { ok: false, status: 'missing' };
+      const insertAt = idx + at.length;
+      next = src.slice(0, insertAt) + (edit.replace || '') + src.slice(insertAt);
+    }
+  } else {
+    if (!edit.find) return { ok: false, status: 'missing' };
+    const idx = src.indexOf(edit.find);
+    if (idx === -1) return { ok: false, status: 'missing' };
+    next = src.slice(0, idx) + (edit.replace || '') + src.slice(idx + edit.find.length);
   }
-  const before = editor.value;
-  editor.value = before.slice(0, idxInText) + edit.replace + before.slice(idxInText + edit.find.length);
-  editor.setSelectionRange(idxInText + edit.replace.length, idxInText + edit.replace.length);
-  setEditStatus(rootEl, edit, 'applied');
-  refreshSectionList();
-  renderMeta('idle');
+
+  d.currentContent = next;
+  if (docName === activeDoc) {
+    editor.value = next;
+    if (docName === 'manuscript') refreshSectionList();
+    renderMeta('idle');
+    updateStats();
+  } else {
+    refreshTabDirtyState();
+  }
+  return { ok: true, status: 'applied' };
+}
+
+function applyEdit(message, edit, idx, rootEl) {
+  const res = applyEditToDoc(edit);
+  setEditStatus(rootEl, edit, res.status);
 }
 
 function dismissEdit(edit, rootEl) { setEditStatus(rootEl, edit, 'dismissed'); }
@@ -766,6 +892,7 @@ async function sendChat() {
         messages: currentSession.messages.map(m => ({ role: m.role, content: m.content })),
         contextText: ctx.text,
         contextLabel: ctx.label,
+        sceneListText: docs.scenelist.loaded ? docs.scenelist.currentContent : null,
       }),
     });
     if (!r.ok) {
@@ -779,19 +906,16 @@ async function sendChat() {
       edits, usage: j.usage, model: j.model,
     };
 
-    // auto-apply spelling + grammar edits
+    // auto-apply spelling + grammar edits (any document)
     for (const e of edits) {
       if (e.type === 'spelling' || e.type === 'grammar') {
-        const i = editor.value.indexOf(e.find);
-        if (i !== -1) {
-          editor.value = editor.value.slice(0, i) + e.replace + editor.value.slice(i + e.find.length);
-          e.status = 'applied';
-        } else {
-          e.status = 'missing';
-        }
+        const res = applyEditToDoc(e);
+        e.status = res.status;
       }
     }
-    refreshSectionList(); renderMeta('idle');
+    if (activeDoc === 'manuscript') refreshSectionList();
+    renderMeta('idle');
+    updateStats();
 
     currentSession.messages.push(assistantMsg);
     appendMessageDOM(assistantMsg);
@@ -805,18 +929,28 @@ async function sendChat() {
 }
 
 // ---------- context ----------
+// The chat panel sends manuscript context (current section or selection) +
+// the full scenelist. When the user is editing the scenelist tab, the
+// "manuscript context" still comes from the in-memory manuscript doc, not
+// from what's currently in the textarea.
 function buildContext() {
-  if (sendFullDoc.checked) {
-    return { text: editor.value, label: 'full document' };
+  const m = docs.manuscript;
+  // On the manuscript tab, pull selection/cursor from the editor;
+  // otherwise just use the doc as-is (whole thing).
+  const onManuscript = activeDoc === 'manuscript';
+  const text = onManuscript ? editor.value : m.currentContent;
+  const selStart = onManuscript ? editor.selectionStart : 0;
+  const selEnd   = onManuscript ? editor.selectionEnd   : 0;
+
+  if (sendFullDoc.checked) return { text, label: 'full manuscript' };
+  if (onManuscript && selEnd > selStart) {
+    return { text: text.slice(selStart, selEnd), label: `selection (${selEnd - selStart} chars)` };
   }
-  // prefer current selection if non-empty
-  const selStart = editor.selectionStart, selEnd = editor.selectionEnd;
-  if (selEnd > selStart) {
-    return { text: editor.value.slice(selStart, selEnd), label: `selection (${selEnd - selStart} chars)` };
+  if (onManuscript) {
+    const cur = currentSection(text, selStart);
+    if (cur) return { text: cur.text, label: `manuscript section ${cur.label}` };
   }
-  const cur = currentSection(editor.value, selStart);
-  if (cur) return { text: cur.text, label: `section ${cur.label}` };
-  return { text: editor.value, label: 'full document (no sections found)' };
+  return { text, label: 'full manuscript' };
 }
 
 function updateContextLabel() {
@@ -843,7 +977,31 @@ function countWords(s) {
 
 function fmtCount(n) { return n.toLocaleString(); }
 
+// Parse the scenelist table: rows are `| N | title | purpose | status |`.
+// Returns { total, drafted } from rows where N is numeric.
+function sceneListStats(text) {
+  if (!text) return { total: 0, drafted: 0 };
+  let total = 0, drafted = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*\|\s*(\d+)\s*\|[^|]*\|[^|]*\|\s*([^|]*?)\s*\|/);
+    if (!m) continue;
+    total++;
+    if (/draft\s*done/i.test(m[2])) drafted++;
+  }
+  return { total, drafted };
+}
+
 function updateStats() {
+  if (activeDoc === 'scenelist') {
+    const s = sceneListStats(editor.value);
+    const remaining = s.total - s.drafted;
+    statSection.textContent = `scene list`;
+    statSectionWords.innerHTML = `<strong>${s.drafted}</strong> drafted · <strong>${remaining}</strong> remaining`;
+    // total = manuscript word count, still useful while on the scenelist tab
+    const total = countWords(docs.manuscript.currentContent);
+    statTotal.innerHTML = `<strong>${fmtCount(total)}</strong> manuscript words`;
+    return;
+  }
   const total = countWords(editor.value);
   statTotal.innerHTML = `<strong>${fmtCount(total)}</strong> words total`;
   const cur = currentSection(editor.value, editor.selectionStart);
@@ -865,8 +1023,13 @@ editor.addEventListener('keyup', updateOnCursorOrEdit);
 sendFullDoc.addEventListener('change', updateContextLabel);
 
 // ---------- events ----------
-editor.addEventListener('input', () => { renderMeta('idle'); refreshSectionList(); updateStats(); });
-saveBtn.addEventListener('click', saveFile);
+editor.addEventListener('input', () => {
+  active().currentContent = editor.value;
+  renderMeta('idle');
+  if (activeDoc === 'manuscript') refreshSectionList();
+  updateStats();
+});
+saveBtn.addEventListener('click', () => saveDoc());
 jumpBottom.addEventListener('click', jumpToBottom);
 jumpPrev.addEventListener('click', () => jumpToSection(-1));
 jumpNext.addEventListener('click', () => jumpToSection(+1));
@@ -876,6 +1039,10 @@ jumpSelect.addEventListener('change', (e) => {
   scrollEditorToOffset(parseInt(v, 10), { atTop: true });
   e.target.value = '';
 });
+
+for (const btn of tabButtons) {
+  btn.addEventListener('click', () => switchTab(btn.dataset.doc));
+}
 
 claudeToggle.addEventListener('click', toggleClaude);
 claudeClose.addEventListener('click', closeClaude);
@@ -887,14 +1054,15 @@ chatInput.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveDoc(); }
 });
 
 window.addEventListener('beforeunload', (e) => {
-  if (editor.value !== savedContent) { e.preventDefault(); e.returnValue = ''; }
+  if (activeDoc && editor) docs[activeDoc].currentContent = editor.value;
+  if (Object.values(docs).some(isDirty)) { e.preventDefault(); e.returnValue = ''; }
 });
 
-setInterval(() => { if (lastSaveAt) renderMeta('idle'); }, 15000);
+setInterval(() => { if (active().lastSaveAt) renderMeta('idle'); }, 15000);
 
 // ---------- escape helpers ----------
 function escapeHtml(s) {
@@ -903,7 +1071,12 @@ function escapeHtml(s) {
 function escapeAttr(s) { return escapeHtml(s); }
 
 // ---------- boot ----------
-loadFile();
+const savedActive = localStorage.getItem('write:activeDoc');
+if (savedActive && docs[savedActive]) activeDoc = savedActive;
+refreshTabDirtyState();
+// Load both docs; only the active one re-hydrates the editor (loadDoc handles that).
+loadDoc(activeDoc, { makeActive: true });
+loadDoc(activeDoc === 'manuscript' ? 'scenelist' : 'manuscript');
 loadSkills();
 loadSessionList();
 if (localStorage.getItem('claude:open') === '1' && !isMobile()) openClaude();
