@@ -78,6 +78,18 @@ select.pill {
   padding-right: 22px;
 }
 
+/* ---------- footer status bar ---------- */
+footer.statusbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--border);
+  flex-shrink: 0; font-size: 11px; color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+footer.statusbar .stat strong { color: var(--text); font-weight: 500; }
+footer.statusbar .stat-sep { opacity: 0.4; }
+footer.statusbar .spacer { flex: 1; }
+footer.statusbar .target { color: var(--accent3); }
+
 /* ---------- main body ---------- */
 main {
   flex: 1; min-height: 0;
@@ -251,6 +263,15 @@ main {
       </div>
     </aside>
   </main>
+  <footer class="statusbar">
+    <span class="stat" id="statSection">§ —</span>
+    <span class="stat-sep">·</span>
+    <span class="stat" id="statSectionWords">— words in section</span>
+    <span class="spacer"></span>
+    <span class="stat" id="statTotal">— words total</span>
+    <span class="stat-sep">·</span>
+    <span class="stat target" id="statTarget">target 130k–160k</span>
+  </footer>
   <div id="backdrop"></div>
 </div>
 
@@ -326,6 +347,7 @@ async function loadFile() {
     enableJumpControls(true);
     refreshSectionList();
     updateContextLabel();
+    updateStats();
   } catch (e) {
     renderMeta('error', e.message);
   }
@@ -802,13 +824,48 @@ function updateContextLabel() {
   contextLabel.textContent = `context: ${ctx.label}`;
 }
 
-editor.addEventListener('select', updateContextLabel);
-editor.addEventListener('click', updateContextLabel);
-editor.addEventListener('keyup', updateContextLabel);
+// ---------- stats ----------
+const statSection      = document.getElementById('statSection');
+const statSectionWords = document.getElementById('statSectionWords');
+const statTotal        = document.getElementById('statTotal');
+
+function countWords(s) {
+  if (!s) return 0;
+  // strip section markers (`#N` lines, `###` lines) and {curly-brace beat notes}
+  const cleaned = s
+    .replace(/^#\d+[ \t]*$/gm, '')
+    .replace(/^###[ \t]*$/gm, '')
+    .replace(/\{[^}]*\}/g, '');
+  const trimmed = cleaned.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+function fmtCount(n) { return n.toLocaleString(); }
+
+function updateStats() {
+  const total = countWords(editor.value);
+  statTotal.innerHTML = `<strong>${fmtCount(total)}</strong> words total`;
+  const cur = currentSection(editor.value, editor.selectionStart);
+  if (cur) {
+    statSection.textContent = `§ ${cur.label}`;
+    const sectionWords = countWords(cur.text);
+    statSectionWords.innerHTML = `<strong>${fmtCount(sectionWords)}</strong> words in section`;
+  } else {
+    statSection.textContent = '§ —';
+    statSectionWords.textContent = 'no section';
+  }
+}
+
+function updateOnCursorOrEdit() { updateContextLabel(); updateStats(); }
+
+editor.addEventListener('select', updateOnCursorOrEdit);
+editor.addEventListener('click', updateOnCursorOrEdit);
+editor.addEventListener('keyup', updateOnCursorOrEdit);
 sendFullDoc.addEventListener('change', updateContextLabel);
 
 // ---------- events ----------
-editor.addEventListener('input', () => { renderMeta('idle'); refreshSectionList(); });
+editor.addEventListener('input', () => { renderMeta('idle'); refreshSectionList(); updateStats(); });
 saveBtn.addEventListener('click', saveFile);
 jumpBottom.addEventListener('click', jumpToBottom);
 jumpPrev.addEventListener('click', () => jumpToSection(-1));
