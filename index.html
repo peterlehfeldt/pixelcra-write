@@ -412,15 +412,47 @@ function enableJumpControls(on) {
   jumpSelect.disabled = !on;
 }
 
+// Measures the visual y-offset of a character position in the textarea by
+// mirroring its styles + width in a hidden div and asking the browser where
+// a zero-width marker lands. Counting \n alone is wrong on desktop because
+// wide paragraphs wrap into many visual lines that don't have newlines.
+let _mirror = null;
+const _mirrorProps = [
+  'fontFamily','fontSize','fontWeight','fontStyle','letterSpacing',
+  'lineHeight','tabSize','textTransform','wordSpacing',
+  'paddingTop','paddingRight','paddingBottom','paddingLeft',
+  'borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth',
+  'boxSizing',
+];
+function getMirror() {
+  if (_mirror) return _mirror;
+  _mirror = document.createElement('div');
+  Object.assign(_mirror.style, {
+    position: 'absolute', top: '0', left: '-99999px',
+    visibility: 'hidden', whiteSpace: 'pre-wrap', wordWrap: 'break-word',
+    overflow: 'hidden',
+  });
+  document.body.appendChild(_mirror);
+  return _mirror;
+}
+function offsetToTop(offset) {
+  const m = getMirror();
+  const cs = getComputedStyle(editor);
+  for (const p of _mirrorProps) m.style[p] = cs[p];
+  m.style.width = editor.clientWidth + 'px';
+  // textContent on the prefix, then a marker span whose offsetTop is the visual y
+  m.textContent = editor.value.slice(0, offset);
+  const marker = document.createElement('span');
+  marker.textContent = '​';
+  m.appendChild(marker);
+  const top = marker.offsetTop;
+  return top;
+}
 function scrollEditorToOffset(offset, opts = {}) {
   editor.focus();
   editor.setSelectionRange(offset, offset);
-  const cs = getComputedStyle(editor);
-  const lh = parseFloat(cs.lineHeight) || 22;
-  const padTop = parseFloat(cs.paddingTop) || 0;
-  const before = editor.value.slice(0, offset);
-  const lineNum = (before.match(/\n/g) || []).length;
-  const target = opts.atTop ? lineNum * lh + padTop - 8 : lineNum * lh + padTop - editor.clientHeight / 3;
+  const top = offsetToTop(offset);
+  const target = opts.atTop ? top - 8 : top - editor.clientHeight / 3;
   editor.scrollTop = Math.max(0, target);
 }
 
