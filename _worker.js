@@ -1,30 +1,67 @@
-// write.pixelcra.sh — proxies edits to a single file in a GitHub repo.
-// Env:
-//   GITHUB_TOKEN — fine-grained PAT, Contents: Read+Write, scoped to the REPO below.
-// Auth/identity is enforced by Cloudflare Access in front of this Worker;
-// the PAT is the GitHub identity used for commits.
+// write.pixelcra.sh
+//
+// Two repos:
+//   MANUSCRIPT_REPO — the prose itself (The Broken Pilot.md)
+//   CONFIG_REPO     — skills/*.md and sessions/*.json for the AI sidekick
+//
+// Env (secrets):
+//   GITHUB_TOKEN      — fine-grained PAT, Contents R/W on BOTH repos above
+//   ANTHROPIC_API_KEY — for the Claude chat panel
+//
+// Cloudflare Access enforces identity in front of the Worker.
 
-const REPO   = 'peterlehfeldt/TheBrokenPilot';
-const BRANCH = 'main';
-const PATH   = 'The Broken Pilot.md';
+const MANUSCRIPT_REPO = 'peterlehfeldt/TheBrokenPilot';
+const MANUSCRIPT_BRANCH = 'main';
+const MANUSCRIPT_PATH = 'The Broken Pilot.md';
+
+const CONFIG_REPO = 'peterlehfeldt/write-config';
+const CONFIG_BRANCH = 'main';
+
+const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+const ANTHROPIC_MAX_TOKENS = 4096;
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname === '/api/file') {
-      if (req.method === 'GET') return getFile(env);
-      if (req.method === 'PUT') return putFile(req, env);
-      return new Response('method not allowed', { status: 405 });
+    const p = url.pathname;
+
+    try {
+      if (p === '/api/file') {
+        if (req.method === 'GET') return getManuscript(env);
+        if (req.method === 'PUT') return putManuscript(req, env);
+        return methodNotAllowed();
+      }
+
+      if (p === '/api/skills' && req.method === 'GET') return listSkills(env);
+      const skillMatch = p.match(/^\/api\/skills\/([^/]+)$/);
+      if (skillMatch && req.method === 'GET') return getSkill(env, decodeURIComponent(skillMatch[1]));
+
+      if (p === '/api/sessions' && req.method === 'GET') return listSessions(env);
+      const sessionMatch = p.match(/^\/api\/sessions\/([^/]+)$/);
+      if (sessionMatch) {
+        const id = decodeURIComponent(sessionMatch[1]);
+        if (req.method === 'GET') return getSession(env, id);
+        if (req.method === 'PUT') return putSession(req, env, id);
+        if (req.method === 'DELETE') return deleteSession(env, id);
+        return methodNotAllowed();
+      }
+
+      if (p === '/api/chat' && req.method === 'POST') return chat(req, env);
+
+      return env.ASSETS.fetch(req);
+    } catch (e) {
+      return json({ error: e.message || String(e) }, 500);
     }
-    return env.ASSETS.fetch(req);
-  }
+  },
 };
+
+// ---------- github helpers ----------
 
 function ghHeaders(env) {
   return {
     'authorization': `Bearer ${env.GITHUB_TOKEN}`,
-    'accept':        'application/vnd.github+json',
-    'user-agent':    'write.pixelcra.sh',
+    'accept': 'application/vnd.github+json',
+    'user-agent': 'write.pixelcra.sh',
     'x-github-api-version': '2022-11-28',
   };
 }
@@ -36,33 +73,265 @@ function b64decode(s) {
   return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, '')), c => c.charCodeAt(0)));
 }
 
-async function getFile(env) {
+async function ghGetFile(env, repo, branch, path) {
   const r = await fetch(
-    `https://api.github.com/repos/${REPO}/contents/${encodeURIComponent(PATH)}?ref=${BRANCH}`,
+    `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}?ref=${branch}`,
     { headers: ghHeaders(env), cf: { cacheTtl: 0, cacheEverything: false } },
   );
-  if (!r.ok) return new Response(await r.text(), { status: r.status });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`github GET ${path}: ${r.status} ${await r.text()}`);
   const j = await r.json();
-  return Response.json({ sha: j.sha, content: b64decode(j.content) });
+  return { sha: j.sha, content: b64decode(j.content) };
 }
 
-async function putFile(req, env) {
-  const { sha, content, message } = await req.json();
-  if (typeof content !== 'string') return new Response('content required', { status: 400 });
+async function ghListDir(env, repo, branch, path) {
   const r = await fetch(
-    `https://api.github.com/repos/${REPO}/contents/${encodeURIComponent(PATH)}`,
+    `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}?ref=${branch}`,
+    { headers: ghHeaders(env), cf: { cacheTtl: 0, cacheEverything: false } },
+  );
+  if (r.status === 404) return [];
+  if (!r.ok) throw new Error(`github LIST ${path}: ${r.status} ${await r.text()}`);
+  const j = await r.json();
+  return Array.isArray(j) ? j : [];
+}
+
+async function ghPutFile(env, repo, branch, path, content, sha, message) {
+  const r = await fetch(
+    `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}`,
     {
       method: 'PUT',
       headers: { ...ghHeaders(env), 'content-type': 'application/json' },
       body: JSON.stringify({
-        message: message || `edit via write.pixelcra.sh @ ${new Date().toISOString()}`,
+        message: message || `write.pixelcra.sh @ ${new Date().toISOString()}`,
         content: b64encode(content),
-        sha,
-        branch: BRANCH,
+        sha: sha || undefined,
+        branch,
       }),
     },
   );
-  if (!r.ok) return new Response(await r.text(), { status: r.status });
-  const j = await r.json();
-  return Response.json({ sha: j.content.sha, commit: j.commit.sha });
+  if (!r.ok) throw new Error(`github PUT ${path}: ${r.status} ${await r.text()}`);
+  return await r.json();
+}
+
+async function ghDeleteFile(env, repo, branch, path, sha, message) {
+  const r = await fetch(
+    `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}`,
+    {
+      method: 'DELETE',
+      headers: { ...ghHeaders(env), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: message || `write.pixelcra.sh delete @ ${new Date().toISOString()}`,
+        sha,
+        branch,
+      }),
+    },
+  );
+  if (!r.ok) throw new Error(`github DELETE ${path}: ${r.status} ${await r.text()}`);
+  return await r.json();
+}
+
+// ---------- manuscript ----------
+
+async function getManuscript(env) {
+  const f = await ghGetFile(env, MANUSCRIPT_REPO, MANUSCRIPT_BRANCH, MANUSCRIPT_PATH);
+  if (!f) return json({ error: 'manuscript not found' }, 404);
+  return json({ sha: f.sha, content: f.content });
+}
+
+async function putManuscript(req, env) {
+  const { sha, content, message } = await req.json();
+  if (typeof content !== 'string') return json({ error: 'content required' }, 400);
+  const j = await ghPutFile(env, MANUSCRIPT_REPO, MANUSCRIPT_BRANCH, MANUSCRIPT_PATH, content, sha, message);
+  return json({ sha: j.content.sha, commit: j.commit.sha });
+}
+
+// ---------- skills ----------
+
+async function listSkills(env) {
+  const entries = await ghListDir(env, CONFIG_REPO, CONFIG_BRANCH, 'skills');
+  const skills = entries
+    .filter(e => e.type === 'file' && e.name.endsWith('.md'))
+    .map(e => ({ name: e.name.replace(/\.md$/, ''), file: e.name }));
+  return json({ skills });
+}
+
+async function getSkill(env, name) {
+  const file = name.endsWith('.md') ? name : `${name}.md`;
+  const f = await ghGetFile(env, CONFIG_REPO, CONFIG_BRANCH, `skills/${file}`);
+  if (!f) return json({ error: 'skill not found' }, 404);
+  return json({ name: name.replace(/\.md$/, ''), content: f.content });
+}
+
+// ---------- sessions ----------
+
+async function listSessions(env) {
+  const entries = await ghListDir(env, CONFIG_REPO, CONFIG_BRANCH, 'sessions');
+  const sessions = entries
+    .filter(e => e.type === 'file' && e.name.endsWith('.json'))
+    .map(e => ({ id: e.name.replace(/\.json$/, ''), size: e.size }))
+    .sort((a, b) => b.id.localeCompare(a.id));
+  return json({ sessions });
+}
+
+async function getSession(env, id) {
+  const f = await ghGetFile(env, CONFIG_REPO, CONFIG_BRANCH, `sessions/${id}.json`);
+  if (!f) return json({ error: 'session not found' }, 404);
+  try {
+    return json({ id, sha: f.sha, session: JSON.parse(f.content) });
+  } catch {
+    return json({ error: 'session file is not valid json' }, 500);
+  }
+}
+
+async function putSession(req, env, id) {
+  const body = await req.json();
+  const session = body.session || body;
+  const existing = await ghGetFile(env, CONFIG_REPO, CONFIG_BRANCH, `sessions/${id}.json`);
+  const j = await ghPutFile(
+    env, CONFIG_REPO, CONFIG_BRANCH, `sessions/${id}.json`,
+    JSON.stringify(session, null, 2),
+    existing?.sha,
+    `session ${id} @ ${new Date().toISOString()}`,
+  );
+  return json({ id, sha: j.content.sha });
+}
+
+async function deleteSession(env, id) {
+  const existing = await ghGetFile(env, CONFIG_REPO, CONFIG_BRANCH, `sessions/${id}.json`);
+  if (!existing) return json({ ok: true });
+  await ghDeleteFile(env, CONFIG_REPO, CONFIG_BRANCH, `sessions/${id}.json`, existing.sha, `delete session ${id}`);
+  return json({ ok: true });
+}
+
+// ---------- chat (anthropic proxy) ----------
+
+const PROPOSE_EDITS_TOOL = {
+  name: 'propose_edits',
+  description:
+    'Reply to the author and optionally propose edits to the manuscript. ' +
+    'Use type "spelling" or "grammar" ONLY for safe, narrow, mechanical corrections — these are auto-applied without review. ' +
+    'Use type "prose" for any stylistic, structural, or substantive change — these are queued for the author to accept or reject. ' +
+    'Each edit\'s `find` MUST be an exact, unique substring of the manuscript text that was sent.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      message: {
+        type: 'string',
+        description: 'Reply to the author. Brief — they can see the edits separately.',
+      },
+      edits: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['spelling', 'grammar', 'prose'] },
+            find: { type: 'string' },
+            replace: { type: 'string' },
+            reason: { type: 'string' },
+          },
+          required: ['type', 'find', 'replace', 'reason'],
+        },
+      },
+    },
+    required: ['message', 'edits'],
+  },
+};
+
+async function chat(req, env) {
+  if (!env.ANTHROPIC_API_KEY) return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
+
+  const { skill, messages, contextText, contextLabel } = await req.json();
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return json({ error: 'messages required' }, 400);
+  }
+
+  const skillBody = skill ? await loadSkillBody(env, skill) : '';
+
+  const systemBlocks = [
+    {
+      type: 'text',
+      text:
+        'You are an editorial sidekick for a novelist working in the pixelcra.sh "write" app. ' +
+        'You always reply by calling the `propose_edits` tool. ' +
+        'Keep `message` short — the author values terse, direct feedback. ' +
+        'When the author asks a question that does not call for edits, return an empty `edits` array.',
+    },
+  ];
+  if (skillBody) {
+    systemBlocks.push({
+      type: 'text',
+      text: `--- active skill: ${skill} ---\n\n${skillBody}`,
+      cache_control: { type: 'ephemeral' },
+    });
+  }
+  if (typeof contextText === 'string' && contextText.length > 0) {
+    systemBlocks.push({
+      type: 'text',
+      text: `--- manuscript context${contextLabel ? ` (${contextLabel})` : ''} ---\n\n${contextText}`,
+      cache_control: { type: 'ephemeral' },
+    });
+  }
+
+  const apiMessages = messages.map(m => ({
+    role: m.role,
+    content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+  }));
+
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: ANTHROPIC_MAX_TOKENS,
+      system: systemBlocks,
+      tools: [PROPOSE_EDITS_TOOL],
+      tool_choice: { type: 'tool', name: 'propose_edits' },
+      messages: apiMessages,
+    }),
+  });
+
+  if (!r.ok) {
+    const errText = await r.text();
+    return json({ error: `anthropic ${r.status}: ${errText}` }, r.status);
+  }
+
+  const data = await r.json();
+  const toolBlock = (data.content || []).find(b => b.type === 'tool_use' && b.name === 'propose_edits');
+  if (!toolBlock) {
+    return json({ error: 'model did not return propose_edits tool call', raw: data }, 502);
+  }
+
+  return json({
+    message: toolBlock.input.message || '',
+    edits: Array.isArray(toolBlock.input.edits) ? toolBlock.input.edits : [],
+    usage: data.usage,
+    model: data.model,
+  });
+}
+
+async function loadSkillBody(env, name) {
+  try {
+    const file = name.endsWith('.md') ? name : `${name}.md`;
+    const f = await ghGetFile(env, CONFIG_REPO, CONFIG_BRANCH, `skills/${file}`);
+    return f ? f.content : '';
+  } catch {
+    return '';
+  }
+}
+
+// ---------- misc ----------
+
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
+function methodNotAllowed() {
+  return new Response('method not allowed', { status: 405 });
 }

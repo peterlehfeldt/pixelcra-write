@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>write · the broken pilot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,7 +10,6 @@
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* pixelcra.sh — bone palette, JetBrains Mono. Driven by homepage. */
 :root {
   --bg: #161514;
   --bg-deep: #0e0d0c;
@@ -20,21 +19,22 @@
   --accent: #e8dcc6;
   --accent2: #c25a3e;
   --accent3: #d4b896;
+  --accent-ok: #7fb069;
   --text: #ece4d4;
   --dim: rgba(236, 228, 212, 0.5);
-  --glow: rgba(232,220,198,0.35);
+  --glow: rgba(232, 220, 198, 0.35);
   --pix-font: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --claude-w: 420px;
 }
-html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--pix-font); }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--pix-font); overflow: hidden; }
 #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
+/* ---------- header ---------- */
 header {
-  display: flex; align-items: center; gap: 14px;
-  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-  flex-shrink: 0; font-size: 12px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; font-size: 12px; flex-wrap: nowrap; min-width: 0;
 }
-
-/* shared home-link chrome */
 .px-home {
   display: inline-flex; align-items: baseline; gap: 6px;
   font-family: var(--pix-font); font-weight: 600; font-size: 14px;
@@ -51,19 +51,41 @@ header {
 }
 .px-sep { color: var(--dim); margin: 0 4px; }
 .px-slug { color: var(--text); opacity: 0.85; letter-spacing: 2px; text-transform: lowercase; font-weight: 500; font-size: 13px; }
+.brand { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-shrink: 0; }
 
-header .meta { color: var(--dim); flex: 1; }
+header .meta { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 header .meta .dirty { color: var(--accent3); }
 header .meta .err { color: var(--accent2); }
-header .sha { color: var(--accent); opacity: 0.7; font-size: 11px; }
-header button {
+header .sha { color: var(--accent); opacity: 0.7; font-size: 11px; flex-shrink: 0; }
+
+.jump-group { display: flex; gap: 4px; flex-shrink: 0; }
+header button, .pill {
   background: var(--bg-deep); border: 1px solid var(--border); color: var(--text);
-  font-family: var(--pix-font); font-size: 12px; padding: 6px 14px; border-radius: 3px;
-  cursor: pointer;
+  font-family: var(--pix-font); font-size: 12px; padding: 6px 10px; border-radius: 3px;
+  cursor: pointer; line-height: 1;
 }
-header button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+header button:hover:not(:disabled), .pill:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 header button:disabled { opacity: 0.4; cursor: not-allowed; }
 header button.dirty { border-color: var(--accent3); color: var(--accent3); }
+header button.active { border-color: var(--accent); color: var(--accent); }
+
+select.pill {
+  -webkit-appearance: none; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  padding-right: 22px;
+}
+
+/* ---------- main body ---------- */
+main {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: row;
+  position: relative;
+}
+
+#editor-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #editor {
   flex: 1; min-height: 0;
   background: var(--bg); color: var(--text);
@@ -72,39 +94,206 @@ header button.dirty { border-color: var(--accent3); color: var(--accent3); }
   padding: 24px 28px; width: 100%;
 }
 #editor:disabled { opacity: 0.5; }
+
+/* ---------- claude panel ---------- */
+#claude {
+  width: var(--claude-w); flex-shrink: 0;
+  display: none; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border);
+  min-height: 0;
+}
+#claude.open { display: flex; }
+
+.claude-head {
+  display: flex; gap: 6px; align-items: center;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.claude-head select.pill { flex: 1; min-width: 0; }
+.claude-head .icon-btn { padding: 6px 8px; }
+
+#messages {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 12px; display: flex; flex-direction: column; gap: 12px;
+}
+.msg { font-size: 13px; line-height: 1.55; }
+.msg .role { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.msg.user .body { color: var(--accent3); white-space: pre-wrap; word-wrap: break-word; }
+.msg.assistant .body { color: var(--text); white-space: pre-wrap; word-wrap: break-word; }
+.msg.system .body { color: var(--dim); font-style: italic; }
+.msg.error .body { color: var(--accent2); }
+
+.edits { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.edit {
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 8px 10px; font-size: 12px;
+  background: var(--bg-deep);
+}
+.edit .edit-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.edit .type { font-size: 10px; padding: 2px 6px; border-radius: 2px; text-transform: uppercase; letter-spacing: 1px; }
+.edit .type.spelling { background: rgba(127, 176, 105, 0.15); color: var(--accent-ok); }
+.edit .type.grammar  { background: rgba(127, 176, 105, 0.15); color: var(--accent-ok); }
+.edit .type.prose    { background: rgba(212, 184, 150, 0.15); color: var(--accent3); }
+.edit .status { font-size: 10px; color: var(--dim); margin-left: auto; }
+.edit .status.applied { color: var(--accent-ok); }
+.edit .status.dismissed { color: var(--dim); }
+.edit .status.missing { color: var(--accent2); }
+.edit .reason { color: var(--dim); margin-bottom: 6px; }
+.edit .diff { font-family: var(--pix-font); white-space: pre-wrap; word-wrap: break-word; line-height: 1.4; }
+.edit .diff .del { color: var(--accent2); text-decoration: line-through; opacity: 0.85; }
+.edit .diff .ins { color: var(--accent-ok); }
+.edit .actions { display: flex; gap: 6px; margin-top: 6px; }
+.edit .actions button {
+  flex: 1; padding: 4px 8px; font-size: 11px;
+  background: transparent; border: 1px solid var(--border); color: var(--text);
+  font-family: var(--pix-font); border-radius: 2px; cursor: pointer;
+}
+.edit .actions button:hover { border-color: var(--accent); color: var(--accent); }
+.edit .actions button.danger:hover { border-color: var(--accent2); color: var(--accent2); }
+
+.claude-input {
+  border-top: 1px solid var(--border); padding: 8px 10px;
+  flex-shrink: 0; display: flex; flex-direction: column; gap: 6px;
+}
+.claude-context {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--dim);
+}
+.claude-context label { cursor: pointer; }
+.claude-context input { accent-color: var(--accent); }
+.claude-input textarea {
+  background: var(--bg-deep); color: var(--text); border: 1px solid var(--border);
+  font-family: var(--pix-font); font-size: 13px; line-height: 1.5;
+  padding: 8px 10px; border-radius: 3px; resize: none; outline: none;
+  min-height: 60px; max-height: 200px;
+}
+.claude-input textarea:focus { border-color: var(--accent); }
+.claude-input-row { display: flex; gap: 6px; }
+.claude-input-row button { flex: 1; padding: 6px 10px; }
+
+/* ---------- mobile overlay ---------- */
+#backdrop {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.55); z-index: 9;
+}
+@media (max-width: 768px) {
+  header { gap: 6px; padding: 8px 10px; flex-wrap: wrap; }
+  .brand { order: 1; }
+  .meta-wrap { order: 2; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+  .controls-wrap { order: 3; display: flex; gap: 4px; flex-wrap: wrap; width: 100%; }
+  header .sha { display: none; }
+
+  #editor { padding: 16px 18px; font-size: 15px; }
+
+  #claude {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: 92vw; max-width: var(--claude-w);
+    z-index: 10;
+    transform: translateX(100%); transition: transform 180ms ease-out;
+    display: flex;
+  }
+  #claude.open { transform: translateX(0); }
+  #claude.open ~ #backdrop, #backdrop.open { display: block; }
+}
+
+/* desktop: ensure backdrop never shows */
+@media (min-width: 769px) {
+  #backdrop { display: none !important; }
+}
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <div style="display:flex;align-items:baseline;gap:10px;min-width:0;">
+    <div class="brand">
       <a class="px-home" href="https://pixelcra.sh" title="back to pixelcra.sh"><span class="px-g">&gt;</span>pixelcra<span class="px-d">.</span>sh<span class="px-c"></span></a>
       <span class="px-sep">/</span>
       <span class="px-slug">write</span>
     </div>
-    <span class="meta" id="meta">loading…</span>
-    <span class="sha" id="sha"></span>
-    <button id="saveBtn" disabled>SAVE</button>
+    <div class="meta-wrap">
+      <span class="meta" id="meta">loading…</span>
+      <span class="sha" id="sha"></span>
+    </div>
+    <div class="controls-wrap">
+      <div class="jump-group">
+        <button id="jumpPrev" title="previous section" disabled>§ ↑</button>
+        <button id="jumpNext" title="next section" disabled>§ ↓</button>
+        <select id="jumpSelect" class="pill" title="jump to section" disabled>
+          <option value="">§</option>
+        </select>
+        <button id="jumpBottom" title="jump to bottom" disabled>⤓</button>
+      </div>
+      <button id="saveBtn" disabled>SAVE</button>
+      <button id="claudeToggle" title="toggle claude panel">☰ claude</button>
+    </div>
   </header>
-  <textarea id="editor" spellcheck="false" disabled placeholder="loading…"></textarea>
+  <main>
+    <div id="editor-wrap">
+      <textarea id="editor" spellcheck="false" disabled placeholder="loading…"></textarea>
+    </div>
+    <aside id="claude">
+      <div class="claude-head">
+        <select id="skillSelect" class="pill" title="active skill"><option value="">no skill</option></select>
+        <select id="sessionSelect" class="pill" title="resume session"><option value="">new session</option></select>
+        <button class="icon-btn" id="newSessionBtn" title="start fresh session">+</button>
+        <button class="icon-btn" id="claudeClose" title="close panel">✕</button>
+      </div>
+      <div id="messages"></div>
+      <div class="claude-input">
+        <div class="claude-context">
+          <span id="contextLabel">context: current section</span>
+          <label style="margin-left:auto;"><input type="checkbox" id="sendFullDoc"> send full document</label>
+        </div>
+        <textarea id="chatInput" placeholder="ask claude about the current section… (⌘/ctrl + enter to send)" rows="3"></textarea>
+        <div class="claude-input-row">
+          <button id="sendBtn">SEND</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+  <div id="backdrop"></div>
 </div>
+
 <script>
-const editor = document.getElementById('editor');
-const meta   = document.getElementById('meta');
-const shaEl  = document.getElementById('sha');
-const saveBtn= document.getElementById('saveBtn');
+// ---------- state ----------
+const editor      = document.getElementById('editor');
+const meta        = document.getElementById('meta');
+const shaEl       = document.getElementById('sha');
+const saveBtn     = document.getElementById('saveBtn');
+const jumpPrev    = document.getElementById('jumpPrev');
+const jumpNext    = document.getElementById('jumpNext');
+const jumpBottom  = document.getElementById('jumpBottom');
+const jumpSelect  = document.getElementById('jumpSelect');
+const claudeToggle= document.getElementById('claudeToggle');
+const claudeClose = document.getElementById('claudeClose');
+const claudePanel = document.getElementById('claude');
+const backdrop    = document.getElementById('backdrop');
+const skillSelect = document.getElementById('skillSelect');
+const sessionSelect = document.getElementById('sessionSelect');
+const newSessionBtn = document.getElementById('newSessionBtn');
+const messagesEl  = document.getElementById('messages');
+const chatInput   = document.getElementById('chatInput');
+const sendBtn     = document.getElementById('sendBtn');
+const contextLabel= document.getElementById('contextLabel');
+const sendFullDoc = document.getElementById('sendFullDoc');
 
 let savedContent = '';
 let sha = null;
 let lastSaveAt = null;
 let saving = false;
 
+let currentSession = null; // { id, skill, startedAt, updatedAt, messages: [...] }
+let sessionDirty = false;
+let sessionSaveTimer = null;
+let chatBusy = false;
+
+// ---------- meta render ----------
 function fmtRel(ts) {
   if (!ts) return '';
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60)  return `${s}s ago`;
+  if (s < 60)   return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s/60)}m ago`;
-  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+  if (s < 86400)return `${Math.floor(s/3600)}h ago`;
   return `${Math.floor(s/86400)}d ago`;
 }
 
@@ -114,14 +303,13 @@ function renderMeta(state, extra) {
   saveBtn.disabled = saving || !dirty;
   if (state === 'loading')  { meta.innerHTML = 'loading…'; return; }
   if (state === 'saving')   { meta.innerHTML = 'saving…'; return; }
-  if (state === 'error')    { meta.innerHTML = `<span class="err">${extra || 'error'}</span>`; return; }
+  if (state === 'error')    { meta.innerHTML = `<span class="err">${escapeHtml(extra || 'error')}</span>`; return; }
   if (state === 'conflict') { meta.innerHTML = `<span class="err">remote changed — reload to pull latest</span>`; return; }
   const dot = dirty ? ' <span class="dirty">·</span>' : '';
-  meta.innerHTML = lastSaveAt
-    ? `saved ${fmtRel(lastSaveAt)}${dot}`
-    : `loaded${dot}`;
+  meta.innerHTML = lastSaveAt ? `saved ${fmtRel(lastSaveAt)}${dot}` : `loaded${dot}`;
 }
 
+// ---------- manuscript ----------
 async function loadFile() {
   renderMeta('loading');
   try {
@@ -135,6 +323,9 @@ async function loadFile() {
     shaEl.textContent = sha ? `sha ${sha.slice(0,7)}` : '';
     lastSaveAt = null;
     renderMeta('idle');
+    enableJumpControls(true);
+    refreshSectionList();
+    updateContextLabel();
   } catch (e) {
     renderMeta('error', e.message);
   }
@@ -170,24 +361,463 @@ async function saveFile() {
   }
 }
 
-editor.addEventListener('input', () => renderMeta('idle'));
-saveBtn.addEventListener('click', saveFile);
-document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault();
-    saveFile();
+// ---------- section parsing ----------
+// section start: a line consisting of `#` followed by digits
+// section end:   a line consisting of `###`
+function findSections(text) {
+  const out = [];
+  const re = /^#(\d+)[ \t]*$/gm;
+  let m;
+  while ((m = re.exec(text))) {
+    out.push({ num: parseInt(m[1], 10), index: m.index, line: m[0] });
+  }
+  return out;
+}
+
+function sectionExtent(text, section, allSections) {
+  // section ends at the FIRST of: next `###` line OR next `#N` line OR EOF
+  const endMarker = text.indexOf('\n###', section.index);
+  let end = text.length;
+  if (endMarker !== -1) {
+    const afterEnd = text.indexOf('\n', endMarker + 1);
+    end = afterEnd === -1 ? text.length : afterEnd;
+  }
+  const next = allSections.find(s => s.index > section.index);
+  if (next && next.index < end) end = next.index;
+  return { start: section.index, end };
+}
+
+function currentSection(text, cursor) {
+  const all = findSections(text);
+  if (all.length === 0) return null;
+  let cur = null;
+  for (const s of all) {
+    if (s.index <= cursor) cur = s; else break;
+  }
+  if (!cur) cur = all[0];
+  const ext = sectionExtent(text, cur, all);
+  return { num: cur.num, label: `#${cur.num}`, text: text.slice(ext.start, ext.end), start: ext.start, end: ext.end };
+}
+
+function refreshSectionList() {
+  const all = findSections(editor.value);
+  jumpSelect.innerHTML = '<option value="">§</option>' + all.map(s => `<option value="${s.index}">#${s.num}</option>`).join('');
+  jumpSelect.disabled = all.length === 0;
+}
+
+function enableJumpControls(on) {
+  jumpPrev.disabled = !on;
+  jumpNext.disabled = !on;
+  jumpBottom.disabled = !on;
+  jumpSelect.disabled = !on;
+}
+
+function scrollEditorToOffset(offset, opts = {}) {
+  editor.focus();
+  editor.setSelectionRange(offset, offset);
+  const cs = getComputedStyle(editor);
+  const lh = parseFloat(cs.lineHeight) || 22;
+  const padTop = parseFloat(cs.paddingTop) || 0;
+  const before = editor.value.slice(0, offset);
+  const lineNum = (before.match(/\n/g) || []).length;
+  const target = opts.atTop ? lineNum * lh + padTop - 8 : lineNum * lh + padTop - editor.clientHeight / 3;
+  editor.scrollTop = Math.max(0, target);
+}
+
+function jumpToBottom() {
+  editor.focus();
+  editor.setSelectionRange(editor.value.length, editor.value.length);
+  editor.scrollTop = editor.scrollHeight;
+}
+
+function jumpToSection(direction) {
+  const all = findSections(editor.value);
+  if (all.length === 0) return;
+  const cursor = editor.selectionStart;
+  let target;
+  if (direction > 0) {
+    target = all.find(s => s.index > cursor);
+    if (!target) target = all[all.length - 1];
+  } else {
+    // prev = last section starting STRICTLY before current line
+    const lineStart = editor.value.lastIndexOf('\n', cursor - 1) + 1;
+    target = [...all].reverse().find(s => s.index < lineStart);
+    if (!target) target = all[0];
+  }
+  scrollEditorToOffset(target.index, { atTop: true });
+}
+
+// ---------- claude panel ----------
+function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+
+function openClaude() {
+  claudePanel.classList.add('open');
+  claudeToggle.classList.add('active');
+  if (isMobile()) backdrop.classList.add('open');
+  localStorage.setItem('claude:open', '1');
+  if (!currentSession) startNewSession();
+}
+function closeClaude() {
+  claudePanel.classList.remove('open');
+  claudeToggle.classList.remove('active');
+  backdrop.classList.remove('open');
+  localStorage.setItem('claude:open', '0');
+}
+function toggleClaude() { claudePanel.classList.contains('open') ? closeClaude() : openClaude(); }
+
+// ---------- skills ----------
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const prev = localStorage.getItem('claude:skill') || '';
+    skillSelect.innerHTML = '<option value="">no skill</option>' +
+      j.skills.map(s => `<option value="${escapeAttr(s.name)}"${s.name === prev ? ' selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+  } catch (e) {
+    skillSelect.innerHTML = `<option value="">skills unavailable</option>`;
+  }
+}
+
+skillSelect.addEventListener('change', () => {
+  localStorage.setItem('claude:skill', skillSelect.value);
+  if (currentSession) {
+    currentSession.skill = skillSelect.value || null;
+    markSessionDirty();
   }
 });
-window.addEventListener('beforeunload', (e) => {
-  if (editor.value !== savedContent) {
-    e.preventDefault();
-    e.returnValue = '';
+
+// ---------- sessions ----------
+function newSessionId() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+}
+
+function startNewSession() {
+  currentSession = {
+    id: newSessionId(),
+    skill: skillSelect.value || null,
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messages: [],
+  };
+  sessionDirty = false;
+  sessionSelect.value = '';
+  renderMessages();
+  systemMsg(`new session ${currentSession.id}`);
+}
+
+async function loadSessionList() {
+  try {
+    const r = await fetch('/api/sessions');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    sessionSelect.innerHTML = '<option value="">new session</option>' +
+      j.sessions.slice(0, 30).map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(prettySessionId(s.id))}</option>`).join('');
+  } catch (e) {
+    sessionSelect.innerHTML = `<option value="">sessions unavailable</option>`;
   }
+}
+
+function prettySessionId(id) {
+  // 2026-05-25-1430-12 -> 05-25 14:30
+  const m = id.match(/^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})-(\d{2})$/);
+  if (!m) return id;
+  return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
+
+sessionSelect.addEventListener('change', async () => {
+  const id = sessionSelect.value;
+  if (!id) { startNewSession(); return; }
+  try {
+    await flushSessionSave();
+    const r = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    currentSession = j.session;
+    sessionDirty = false;
+    if (currentSession.skill) {
+      skillSelect.value = currentSession.skill;
+      localStorage.setItem('claude:skill', currentSession.skill);
+    }
+    renderMessages();
+  } catch (e) {
+    systemMsg(`failed to load session: ${e.message}`, 'error');
+  }
+});
+
+newSessionBtn.addEventListener('click', async () => {
+  await flushSessionSave();
+  startNewSession();
+});
+
+function markSessionDirty() {
+  if (!currentSession) return;
+  currentSession.updatedAt = new Date().toISOString();
+  sessionDirty = true;
+  if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(flushSessionSave, 30000);
+}
+
+async function flushSessionSave() {
+  if (sessionSaveTimer) { clearTimeout(sessionSaveTimer); sessionSaveTimer = null; }
+  if (!sessionDirty || !currentSession || currentSession.messages.length === 0) {
+    sessionDirty = false; return;
+  }
+  const id = currentSession.id;
+  const session = currentSession;
+  sessionDirty = false;
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+    // refresh dropdown so a newly-saved session appears
+    await loadSessionList();
+  } catch (e) {
+    sessionDirty = true;
+    systemMsg(`session save failed: ${e.message}`, 'error');
+  }
+}
+
+// flush on tab close (best effort)
+window.addEventListener('pagehide', () => {
+  if (sessionDirty && currentSession && currentSession.messages.length > 0) {
+    try {
+      const blob = new Blob([JSON.stringify({ session: currentSession })], { type: 'application/json' });
+      navigator.sendBeacon(`/api/sessions/${encodeURIComponent(currentSession.id)}`, blob);
+      sessionDirty = false;
+    } catch {}
+  }
+});
+
+// ---------- messages rendering ----------
+function renderMessages() {
+  messagesEl.innerHTML = '';
+  if (!currentSession) return;
+  for (const m of currentSession.messages) appendMessageDOM(m);
+  scrollMessagesToBottom();
+}
+
+function appendMessageDOM(m) {
+  const div = document.createElement('div');
+  div.className = `msg ${m.role}`;
+  const role = document.createElement('div'); role.className = 'role'; role.textContent = m.role;
+  const body = document.createElement('div'); body.className = 'body'; body.textContent = m.content || '';
+  div.appendChild(role); div.appendChild(body);
+  if (m.role === 'assistant' && Array.isArray(m.edits) && m.edits.length > 0) {
+    const editsEl = document.createElement('div'); editsEl.className = 'edits';
+    m.edits.forEach((e, i) => editsEl.appendChild(renderEdit(m, e, i)));
+    div.appendChild(editsEl);
+  }
+  messagesEl.appendChild(div);
+}
+
+function renderEdit(message, edit, idx) {
+  const root = document.createElement('div'); root.className = 'edit';
+  const head = document.createElement('div'); head.className = 'edit-head';
+  const t = document.createElement('span'); t.className = `type ${edit.type}`; t.textContent = edit.type;
+  const status = document.createElement('span'); status.className = 'status'; status.textContent = edit.status || 'pending';
+  if (edit.status) status.classList.add(edit.status);
+  head.appendChild(t); head.appendChild(status);
+  root.appendChild(head);
+
+  if (edit.reason) {
+    const reason = document.createElement('div'); reason.className = 'reason'; reason.textContent = edit.reason;
+    root.appendChild(reason);
+  }
+  const diff = document.createElement('div'); diff.className = 'diff';
+  const del = document.createElement('span'); del.className = 'del'; del.textContent = edit.find;
+  const sp = document.createElement('span'); sp.textContent = '  →  ';
+  const ins = document.createElement('span'); ins.className = 'ins'; ins.textContent = edit.replace;
+  diff.appendChild(del); diff.appendChild(sp); diff.appendChild(ins);
+  root.appendChild(diff);
+
+  if (!edit.status || edit.status === 'pending') {
+    const actions = document.createElement('div'); actions.className = 'actions';
+    const apply = document.createElement('button'); apply.textContent = 'apply';
+    const skip  = document.createElement('button'); skip.textContent = 'dismiss'; skip.classList.add('danger');
+    apply.addEventListener('click', () => applyEdit(message, edit, idx, root));
+    skip.addEventListener('click', () => dismissEdit(edit, root));
+    actions.appendChild(apply); actions.appendChild(skip);
+    root.appendChild(actions);
+  }
+  return root;
+}
+
+function setEditStatus(rootEl, edit, status) {
+  edit.status = status;
+  const s = rootEl.querySelector('.status');
+  if (s) { s.className = 'status ' + status; s.textContent = status; }
+  const actions = rootEl.querySelector('.actions');
+  if (actions) actions.remove();
+  markSessionDirty();
+}
+
+function applyEdit(message, edit, idx, rootEl) {
+  const idxInText = editor.value.indexOf(edit.find);
+  if (idxInText === -1) {
+    setEditStatus(rootEl, edit, 'missing');
+    return;
+  }
+  const before = editor.value;
+  editor.value = before.slice(0, idxInText) + edit.replace + before.slice(idxInText + edit.find.length);
+  editor.setSelectionRange(idxInText + edit.replace.length, idxInText + edit.replace.length);
+  setEditStatus(rootEl, edit, 'applied');
+  refreshSectionList();
+  renderMeta('idle');
+}
+
+function dismissEdit(edit, rootEl) { setEditStatus(rootEl, edit, 'dismissed'); }
+
+function systemMsg(text, kind = 'system') {
+  const div = document.createElement('div');
+  div.className = `msg ${kind === 'error' ? 'error' : 'system'}`;
+  const role = document.createElement('div'); role.className = 'role'; role.textContent = kind;
+  const body = document.createElement('div'); body.className = 'body'; body.textContent = text;
+  div.appendChild(role); div.appendChild(body);
+  messagesEl.appendChild(div);
+  scrollMessagesToBottom();
+}
+
+function scrollMessagesToBottom() {
+  requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
+}
+
+// ---------- chat send ----------
+async function sendChat() {
+  if (chatBusy) return;
+  const text = chatInput.value.trim();
+  if (!text) return;
+  if (!currentSession) startNewSession();
+
+  const ctx = buildContext();
+  const userMsg = { role: 'user', content: text, at: new Date().toISOString(), context: ctx.label };
+  currentSession.messages.push(userMsg);
+  appendMessageDOM(userMsg);
+  scrollMessagesToBottom();
+  chatInput.value = '';
+  markSessionDirty();
+
+  chatBusy = true; sendBtn.disabled = true; sendBtn.textContent = '…';
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skill: skillSelect.value || null,
+        messages: currentSession.messages.map(m => ({ role: m.role, content: m.content })),
+        contextText: ctx.text,
+        contextLabel: ctx.label,
+      }),
+    });
+    if (!r.ok) {
+      const errBody = await r.text();
+      throw new Error(`HTTP ${r.status}: ${errBody}`);
+    }
+    const j = await r.json();
+    const edits = (j.edits || []).map(e => ({ ...e, status: 'pending' }));
+    const assistantMsg = {
+      role: 'assistant', content: j.message || '', at: new Date().toISOString(),
+      edits, usage: j.usage, model: j.model,
+    };
+
+    // auto-apply spelling + grammar edits
+    for (const e of edits) {
+      if (e.type === 'spelling' || e.type === 'grammar') {
+        const i = editor.value.indexOf(e.find);
+        if (i !== -1) {
+          editor.value = editor.value.slice(0, i) + e.replace + editor.value.slice(i + e.find.length);
+          e.status = 'applied';
+        } else {
+          e.status = 'missing';
+        }
+      }
+    }
+    refreshSectionList(); renderMeta('idle');
+
+    currentSession.messages.push(assistantMsg);
+    appendMessageDOM(assistantMsg);
+    scrollMessagesToBottom();
+    markSessionDirty();
+  } catch (e) {
+    systemMsg(`error: ${e.message}`, 'error');
+  } finally {
+    chatBusy = false; sendBtn.disabled = false; sendBtn.textContent = 'SEND';
+  }
+}
+
+// ---------- context ----------
+function buildContext() {
+  if (sendFullDoc.checked) {
+    return { text: editor.value, label: 'full document' };
+  }
+  // prefer current selection if non-empty
+  const selStart = editor.selectionStart, selEnd = editor.selectionEnd;
+  if (selEnd > selStart) {
+    return { text: editor.value.slice(selStart, selEnd), label: `selection (${selEnd - selStart} chars)` };
+  }
+  const cur = currentSection(editor.value, selStart);
+  if (cur) return { text: cur.text, label: `section ${cur.label}` };
+  return { text: editor.value, label: 'full document (no sections found)' };
+}
+
+function updateContextLabel() {
+  const ctx = buildContext();
+  contextLabel.textContent = `context: ${ctx.label}`;
+}
+
+editor.addEventListener('select', updateContextLabel);
+editor.addEventListener('click', updateContextLabel);
+editor.addEventListener('keyup', updateContextLabel);
+sendFullDoc.addEventListener('change', updateContextLabel);
+
+// ---------- events ----------
+editor.addEventListener('input', () => { renderMeta('idle'); refreshSectionList(); });
+saveBtn.addEventListener('click', saveFile);
+jumpBottom.addEventListener('click', jumpToBottom);
+jumpPrev.addEventListener('click', () => jumpToSection(-1));
+jumpNext.addEventListener('click', () => jumpToSection(+1));
+jumpSelect.addEventListener('change', (e) => {
+  const v = e.target.value;
+  if (v === '') return;
+  scrollEditorToOffset(parseInt(v, 10), { atTop: true });
+  e.target.value = '';
+});
+
+claudeToggle.addEventListener('click', toggleClaude);
+claudeClose.addEventListener('click', closeClaude);
+backdrop.addEventListener('click', closeClaude);
+
+sendBtn.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendChat(); }
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (editor.value !== savedContent) { e.preventDefault(); e.returnValue = ''; }
 });
 
 setInterval(() => { if (lastSaveAt) renderMeta('idle'); }, 15000);
 
+// ---------- escape helpers ----------
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+// ---------- boot ----------
 loadFile();
+loadSkills();
+loadSessionList();
+if (localStorage.getItem('claude:open') === '1' && !isMobile()) openClaude();
 </script>
 </body>
 </html>
