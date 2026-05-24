@@ -245,7 +245,9 @@ async function chat(req, env) {
     return json({ error: 'messages required' }, 400);
   }
 
-  const skillBody = skill ? await loadSkillBody(env, skill) : '';
+  const rawSkill = skill ? await loadSkillBody(env, skill) : '';
+  const { meta: skillMeta, body: skillBody } = parseFrontmatter(rawSkill);
+  const model = skillMeta.model || ANTHROPIC_MODEL;
 
   const systemBlocks = [
     {
@@ -285,7 +287,7 @@ async function chat(req, env) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model,
       max_tokens: ANTHROPIC_MAX_TOKENS,
       system: systemBlocks,
       tools: [PROPOSE_EDITS_TOOL],
@@ -321,6 +323,20 @@ async function loadSkillBody(env, name) {
   } catch {
     return '';
   }
+}
+
+// Minimal YAML-ish frontmatter parser: handles `key: value` pairs between two `---` fences.
+// Returns the raw body (without frontmatter) if a fence is found; otherwise the whole string.
+function parseFrontmatter(text) {
+  if (!text) return { meta: {}, body: '' };
+  const m = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n([\s\S]*)$/);
+  if (!m) return { meta: {}, body: text };
+  const meta = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*?)\s*$/);
+    if (kv) meta[kv[1]] = kv[2].replace(/^["']|["']$/g, '');
+  }
+  return { meta, body: m[2] };
 }
 
 // ---------- misc ----------
