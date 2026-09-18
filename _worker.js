@@ -75,8 +75,16 @@ function ghHeaders(env) {
   };
 }
 
+// Chunked: spreading a whole manuscript into String.fromCharCode(...bytes)
+// blows the stack once the document passes ~100 KB.
 function b64encode(s) {
-  return btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+  const bytes = new TextEncoder().encode(s);
+  const CHUNK = 0x8000;
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
 }
 function b64decode(s) {
   return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, '')), c => c.charCodeAt(0)));
